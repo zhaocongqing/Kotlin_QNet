@@ -1,5 +1,6 @@
 package com.minimal.network
 
+import android.util.Log
 import com.minimal.network.annotation.NetInternalAPI
 import com.minimal.network.call.NetHttpCall
 import com.minimal.network.call.Okhttp3Call
@@ -13,11 +14,15 @@ import com.minimal.network.request.MediaConst
 import com.minimal.network.request.Request
 import com.minimal.network.response.NetResult
 import com.minimal.network.response.Response
+import com.minimal.network.utils.Https
+import com.minimal.network.utils.setEncrypt
+import com.minimal.network.utils.trustSSLCertificate
 import kotlinx.coroutines.CoroutineScope
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.InterruptedIOException
+import java.net.Proxy
 import java.net.SocketException
 import java.net.URLConnection
 import java.net.UnknownHostException
@@ -43,19 +48,33 @@ object NetHelper {
         it
     }
 
+    /**
+     * 初始化
+     * @param scope 协程作用域
+     * @param isDebug 是否是debug模式
+     * @param call 网络请求实现
+     * @param converter 数据转换器
+     */
     @JvmOverloads
-    fun init(isDebug: Boolean? = false) {
-        this.isDebug = isDebug
-    }
-
-    @JvmOverloads
-    fun init(scope: CoroutineScope, isDebug: Boolean? = false, call: NetHttpCall = Okhttp3Call {
-        // 15秒超时
-        callTimeout(15, TimeUnit.SECONDS)
-        if (isDebug == true) {
-            addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
-        }
-    }, converter: NetHttpConverter = JacksonConverter()
+    fun init(
+        scope: CoroutineScope,
+        isDebug: Boolean? = false,
+        call: NetHttpCall = Okhttp3Call {
+            // 总超时时间：15秒
+            callTimeout(15, TimeUnit.SECONDS)
+            // 是否开启请求加密和响应校验
+            setEncrypt(isDebug != true)
+            if (isDebug == true) {
+                addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+            } else {
+                // 非调试模式下不使用代理
+                proxy(Proxy.NO_PROXY)
+            }
+            // 信任所有证书
+            trustSSLCertificate()
+        },
+        // 默认使用Jackson转换器
+        converter: NetHttpConverter = JacksonConverter()
     ){
         this.scope = scope
         this.isDebug = isDebug
@@ -154,4 +173,17 @@ object NetHelper {
 
     @NetInternalAPI
     data class FailInfo(val code: Int, var msg: String)
+
+    @JvmStatic
+    fun debug(message: Any) {
+        if (isDebug == true) {
+            val adjustMessage = if(message is Throwable) {
+                message.stackTraceToString()
+            } else {
+                val occurred = Throwable().stackTrace.getOrNull(1)?.run { " (${fileName}:${lineNumber})" } ?: ""
+                message.toString() + occurred
+            }
+            Log.d(NetConfig.TAG, adjustMessage)
+        }
+    }
 }
